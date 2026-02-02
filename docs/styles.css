@@ -1,0 +1,5 @@
+body { font-family: system-ui; margin: 16px; }
+.hidden { display:none; }
+.card { border:1px solid #ccc; border-radius:8px; padding:12px; margin-bottom:12px; }
+button { margin:4px; }
+.muted { color:#666; font-size:12px; }
