@@ -1,19 +1,37 @@
 /* ========= State ========= */
-const STORAGE_KEY = "gift_manager_v3";
+const STORAGE_KEY = "gift_manager_v4";
 
-// v2から移行（あれば）
-function migrateIfNeeded() {
-  const v3 = localStorage.getItem(STORAGE_KEY);
-  if (v3) return;
+// v3/v2から移行（あれば）
+function migrate() {
+  if (localStorage.getItem(STORAGE_KEY)) return;
 
+  const v3 = localStorage.getItem("gift_manager_v3");
   const v2 = localStorage.getItem("gift_manager_v2");
-  if (v2) {
-    localStorage.setItem(STORAGE_KEY, v2);
-  } else {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ campaigns: [], logs: [], externalTotals: [], tasks: [] }));
+  const src = v3 || v2;
+  if (src) {
+    try {
+      const s = JSON.parse(src);
+      // 旧campaignにsource_modeがあっても無視して内部入力化
+      const migrated = {
+        campaigns: (Array.isArray(s.campaigns) ? s.campaigns : []).map(c => ({
+          id: c.id || uid(),
+          name: c.name || "無名企画",
+          start_date: c.start_date || "",
+          // v4: rules を持つ（無ければ空）
+          rules: Array.isArray(c.rules) ? c.rules : [],
+          created_at: c.created_at || new Date().toISOString(),
+        })),
+        logs: Array.isArray(s.logs) ? s.logs : [],
+        tasks: Array.isArray(s.tasks) ? s.tasks : [],
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      return;
+    } catch {}
   }
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ campaigns: [], logs: [], tasks: [] }));
 }
-migrateIfNeeded();
+migrate();
 
 function loadState() {
   try {
@@ -22,11 +40,10 @@ function loadState() {
     return {
       campaigns: Array.isArray(s.campaigns) ? s.campaigns : [],
       logs: Array.isArray(s.logs) ? s.logs : [],
-      externalTotals: Array.isArray(s.externalTotals) ? s.externalTotals : [],
       tasks: Array.isArray(s.tasks) ? s.tasks : [],
     };
   } catch {
-    return { campaigns: [], logs: [], externalTotals: [], tasks: [] };
+    return { campaigns: [], logs: [], tasks: [] };
   }
 }
 let state = loadState();
@@ -38,18 +55,10 @@ function escapeHtml(s) {
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[c]));
 }
-function formatCampaignDate(c) {
-  if (c.date_mode === "single") return c.start_date;
-  const end = c.end_date || c.start_date;
-  return `${c.start_date}–${end}`;
-}
-function incompleteCountByCampaign(campaignId) {
-  return state.tasks.filter(t => t.campaign_id === campaignId && t.status !== "done").length;
-}
-function overallCounts() {
-  const open = state.tasks.filter(t => t.status !== "done").length;
-  const done = state.tasks.filter(t => t.status === "done").length;
-  return { open, done };
+
+function byISODateOnly(iso) {
+  // "2026-02-02T..." -> "2026-02-02"
+  return (iso || "").slice(0, 10);
 }
 
 /* ========= Toast ========= */
@@ -60,7 +69,7 @@ function toast(msg) {
   toastEl.textContent = msg;
   toastEl.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 1600);
+  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 1500);
 }
 
 /* ========= Views ========= */
@@ -79,7 +88,7 @@ function showView(name) {
 /* ========= Nav Active ========= */
 function setActiveNav(viewName) {
   document.querySelectorAll(".navlink").forEach(a => a.classList.remove("active"));
-  const map = { home:"home", tasks:"tasks", campaigns:"campaigns", campaign:"campaigns" };
+  const map = { home:"home", tasks:"tasks", campaigns:"campaigns", campaign:"tasks" };
   const key = map[viewName] || "home";
   const el = document.querySelector(`.navlink[data-nav="${key}"]`);
   if (el) el.classList.add("active");
@@ -98,13 +107,13 @@ function parseHash() {
       renderCampaignDetail();
       return;
     }
-    location.hash = "#campaigns";
+    location.hash = "#tasks";
     return;
   }
 
   if (h === "tasks") {
     showView("tasks");
-    renderTaskHub();
+    renderTaskCampaignList();
     return;
   }
 
@@ -124,32 +133,99 @@ const statCampaigns = document.getElementById("statCampaigns");
 const statTasksOpen = document.getElementById("statTasksOpen");
 const statTasksDone = document.getElementById("statTasksDone");
 const overallPill = document.getElementById("overallPill");
-document.getElementById("quickNewTask")?.addEventListener("click", () => location.hash = "#tasks");
-document.getElementById("quickNewCampaign")?.addEventListener("click", () => location.hash = "#campaigns");
+
+function overallCounts() {
+  const open = state.tasks.filter(t => t.status !== "done").length;
+  const done = state.tasks.filter(t => t.status === "done").length;
+  return { open, done };
+}
 
 function renderHome() {
   const { open, done } = overallCounts();
   statCampaigns.textContent = String(state.campaigns.length);
   statTasksOpen.textContent = String(open);
   statTasksDone.textContent = String(done);
+  overallPill.textContent = open > 0 ? `未完了 ${open}` : "未完了なし";
+}
 
-  if (open > 0) {
-    overallPill.textContent = `未完了 ${open}`;
-  } else {
-    overallPill.textContent = "未完了なし";
+/* ========= Reward rules ========= */
+/**
+ * rules: [{ threshold: number, reward: string }]
+ * returns matched reward (highest threshold <= points), else ""
+ */
+function getRewardForPoints(rules, points) {
+  const sorted = (Array.isArray(rules) ? rules : [])
+    .filter(r => Number.isFinite(r.threshold) && (r.reward || "").trim())
+    .slice()
+    .sort((a,b) => a.threshold - b.threshold);
+
+  let matched = "";
+  for (const r of sorted) {
+    if (points >= r.threshold) matched = r.reward;
+    else break;
   }
+  return matched;
+}
+
+/* ========= Totals ========= */
+function computeTotalsForCampaign(campaignId) {
+  const map = new Map();
+  for (const log of state.logs.filter(l => l.campaign_id === campaignId)) {
+    const name = (l.listener_name || "").trim();
+    if (!name) continue;
+    map.set(name, (map.get(name) || 0) + (l.delta_points || 0));
+  }
+  const rows = Array.from(map.entries()).map(([listener_name, points]) => ({ listener_name, points }));
+  rows.sort((a,b) => b.points - a.points || a.listener_name.localeCompare(b.listener_name));
+  return rows;
+}
+
+function incompleteCountByCampaign(campaignId) {
+  return state.tasks.filter(t => t.campaign_id === campaignId && t.status !== "done").length;
+}
+
+/* ========= Campaign creation (rules) ========= */
+const rulesBox = document.getElementById("rulesBox");
+const addRuleRowBtn = document.getElementById("addRuleRowBtn");
+
+function addRuleRow(threshold = "", reward = "") {
+  const rowId = uid();
+  const el = document.createElement("div");
+  el.className = "ruleRow";
+  el.dataset.rowid = rowId;
+  el.innerHTML = `
+    <label class="field">
+      <span>ポイント</span>
+      <input class="input" type="number" min="0" step="1" data-threshold value="${escapeHtml(threshold)}" placeholder="例：1000" />
+    </label>
+    <label class="field">
+      <span>返礼品内容</span>
+      <input class="input" type="text" data-reward value="${escapeHtml(reward)}" placeholder="例：デジグッズA / 実写チェキ / 発送" />
+    </label>
+    <div class="field">
+      <span>&nbsp;</span>
+      <button class="btn ghost" type="button" data-del>削除</button>
+    </div>
+  `;
+  el.querySelector("[data-del]").addEventListener("click", () => {
+    el.remove();
+  });
+  rulesBox.appendChild(el);
+}
+
+addRuleRowBtn?.addEventListener("click", () => addRuleRow("", ""));
+
+// 初期3行（使わないなら空でもOK）
+if (rulesBox) {
+  addRuleRow("1000", "デジグッズA");
+  addRuleRow("3000", "デジグッズB");
+  addRuleRow("5000", "リアルグッズ発送");
 }
 
 /* ========= Campaigns ========= */
 const campaignListEl = document.getElementById("campaignList");
 const campaignSearchEl = document.getElementById("campaignSearch");
 const createCampaignForm = document.getElementById("createCampaignForm");
-const dateModeEl = document.getElementById("date_mode");
-const endDateWrap = document.getElementById("endDateWrap");
-
-dateModeEl?.addEventListener("change", () => {
-  endDateWrap.style.display = (dateModeEl.value === "range") ? "block" : "none";
-});
 
 campaignSearchEl?.addEventListener("input", renderCampaigns);
 
@@ -157,27 +233,31 @@ createCampaignForm?.addEventListener("submit", (e) => {
   e.preventDefault();
   const fd = new FormData(createCampaignForm);
   const name = (fd.get("name") || "").toString().trim();
-  const date_mode = fd.get("date_mode");
   const start_date = (fd.get("start_date") || "").toString().trim();
-  const end_date_raw = (fd.get("end_date") || "").toString().trim();
-  const source_mode = fd.get("source_mode");
-
   if (!name || !start_date) return;
+
+  // rules collect
+  const rules = [];
+  rulesBox.querySelectorAll(".ruleRow").forEach(row => {
+    const th = parseInt(row.querySelector("[data-threshold]")?.value, 10);
+    const rw = (row.querySelector("[data-reward]")?.value || "").toString().trim();
+    if (Number.isFinite(th) && rw) rules.push({ threshold: th, reward: rw });
+  });
+  rules.sort((a,b) => a.threshold - b.threshold);
 
   state.campaigns.unshift({
     id: uid(),
     name,
-    date_mode,
     start_date,
-    end_date: date_mode === "single" ? null : (end_date_raw || null),
-    source_mode,
+    rules,
     created_at: new Date().toISOString(),
   });
   saveState();
+
   createCampaignForm.reset();
-  endDateWrap.style.display = "none";
+  // ルールは残す（毎回ゼロから入力したくない想定）。消したければここでrulesBoxを初期化して。
   renderCampaigns();
-  renderTaskHubCampaignOptions();
+  renderTaskCampaignList();
   renderHome();
   toast("企画を作成");
 });
@@ -193,18 +273,19 @@ function renderCampaigns() {
   }
 
   campaignListEl.innerHTML = list.map(c => {
-    const dateLabel = formatCampaignDate(c);
     const open = incompleteCountByCampaign(c.id);
     const icon = open > 0 ? "🔴" : "✅";
-    const badge = c.source_mode === "internal" ? "internal" : "external";
+    const totals = computeTotalsForCampaign(c.id);
+    const top = totals.slice(0, 2).map(r => `${escapeHtml(r.listener_name)} ${r.points}pt`).join(" / ");
+    const ruleSummary = (c.rules || []).slice(0, 2).map(r => `${r.threshold}→${escapeHtml(r.reward)}`).join(" / ");
     return `
       <div class="item">
         <div>
           <div>
             <a href="#campaign=${c.id}"><strong>${escapeHtml(c.name)}</strong></a>
-            <span class="badge">${badge}</span>
+            <span class="badge">${escapeHtml(c.start_date)}</span>
           </div>
-          <div class="muted">${escapeHtml(dateLabel)} · 未完了 ${open}</div>
+          <div class="muted">未完了 ${open} · 上位: ${top || "—"} · ルール: ${ruleSummary || "—"}</div>
         </div>
         <div style="font-size:18px;">${icon}</div>
       </div>
@@ -212,22 +293,51 @@ function renderCampaigns() {
   }).join("");
 }
 
-/* ========= Campaign Detail ========= */
+/* ========= Task management: Campaign list ========= */
+const taskCampaignListEl = document.getElementById("taskCampaignList");
+const tasksCampaignSearchEl = document.getElementById("tasksCampaignSearch");
+tasksCampaignSearchEl?.addEventListener("input", renderTaskCampaignList);
+
+function renderTaskCampaignList() {
+  const q = (tasksCampaignSearchEl?.value || "").trim().toLowerCase();
+  const list = state.campaigns.filter(c => c.name.toLowerCase().includes(q));
+
+  if (!taskCampaignListEl) return;
+  if (!list.length) {
+    taskCampaignListEl.innerHTML = `<div class="muted">企画がありません。まず企画作成へ。</div>`;
+    return;
+  }
+
+  taskCampaignListEl.innerHTML = list.map(c => {
+    const open = incompleteCountByCampaign(c.id);
+    const icon = open > 0 ? "🔴" : "✅";
+    const totals = computeTotalsForCampaign(c.id);
+    // 企画ごとに「ポイント＆返礼品」をすぐ見れるよう、上位2名だけ表示（重くしない）
+    const top2 = totals.slice(0, 2).map(r => {
+      const reward = getRewardForPoints(c.rules, r.points);
+      return `${escapeHtml(r.listener_name)} ${r.points}pt（${escapeHtml(reward || "—")}）`;
+    }).join(" / ");
+    return `
+      <div class="item">
+        <div>
+          <div>
+            <a href="#campaign=${c.id}"><strong>${escapeHtml(c.name)}</strong></a>
+            <span class="badge">${escapeHtml(c.start_date)}</span>
+          </div>
+          <div class="muted">未完了 ${open} · 上位: ${top2 || "—"}</div>
+        </div>
+        <div style="font-size:18px;">${icon}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+/* ========= Campaign detail ========= */
 const campaignTitleEl = document.getElementById("campaignTitle");
 const campaignMetaEl = document.getElementById("campaignMeta");
 const campaignStatusPill = document.getElementById("campaignStatusPill");
 const deleteCampaignBtn = document.getElementById("deleteCampaignBtn");
-
 const leaderboardBody = document.getElementById("leaderboardBody");
-const liveCard = document.getElementById("liveCard");
-const externalCard = document.getElementById("externalCard");
-
-const listenerNameInput = document.getElementById("listenerName");
-const customPointsInput = document.getElementById("customPoints");
-const liveMsg = document.getElementById("liveMsg");
-const csvText = document.getElementById("csvText");
-const kanbanEl = document.getElementById("kanban");
-const createTaskFormDetail = document.getElementById("createTaskForm");
 
 function getCurrentCampaign() {
   return state.campaigns.find(c => c.id === currentCampaignId) || null;
@@ -240,66 +350,56 @@ deleteCampaignBtn?.addEventListener("click", () => {
 
   state.campaigns = state.campaigns.filter(x => x.id !== c.id);
   state.logs = state.logs.filter(x => x.campaign_id !== c.id);
-  state.externalTotals = state.externalTotals.filter(x => x.campaign_id !== c.id);
   state.tasks = state.tasks.filter(x => x.campaign_id !== c.id);
   saveState();
 
-  renderTaskHubCampaignOptions();
   renderHome();
-  location.hash = "#campaigns";
+  renderCampaigns();
+  renderTaskCampaignList();
+  location.hash = "#tasks";
   toast("企画を削除");
 });
 
-function computeTotals(c) {
-  if (!c) return [];
-  if (c.source_mode === "external") {
-    const rows = state.externalTotals
-      .filter(r => r.campaign_id === c.id)
-      .map(r => ({ listener_name: r.listener_name, points: r.total_points }));
-    rows.sort((a,b)=> b.points - a.points || a.listener_name.localeCompare(b.listener_name));
-    return rows;
-  }
-  const map = new Map();
-  for (const log of state.logs.filter(l => l.campaign_id === c.id)) {
-    map.set(log.listener_name, (map.get(log.listener_name)||0) + log.delta_points);
-  }
-  const rows = Array.from(map.entries()).map(([listener_name, points]) => ({ listener_name, points }));
-  rows.sort((a,b)=> b.points - a.points || a.listener_name.localeCompare(b.listener_name));
-  return rows;
-}
-
-function renderLeaderboard(totals) {
-  if (!leaderboardBody) return;
+function renderLeaderboardForCampaign(c) {
+  const totals = computeTotalsForCampaign(c.id);
   if (!totals.length) {
-    leaderboardBody.innerHTML = `<tr><td colspan="2" class="muted">データなし</td></tr>`;
+    leaderboardBody.innerHTML = `<tr><td colspan="3" class="muted">データなし</td></tr>`;
     return;
   }
-  leaderboardBody.innerHTML = totals.map(r =>
-    `<tr><td>${escapeHtml(r.listener_name)}</td><td class="right">${r.points}</td></tr>`
-  ).join("");
-}
 
-function setLiveMsg(msg){ if (liveMsg) liveMsg.textContent = msg || ""; }
+  leaderboardBody.innerHTML = totals.map(r => {
+    const reward = getRewardForPoints(c.rules, r.points);
+    return `
+      <tr>
+        <td>${escapeHtml(r.listener_name)}</td>
+        <td class="right">${r.points}</td>
+        <td>${escapeHtml(reward || "—")}</td>
+      </tr>
+    `;
+  }).join("");
+}
 
 function renderCampaignDetail() {
   const c = getCurrentCampaign();
-  if (!c) { location.hash = "#campaigns"; return; }
+  if (!c) { location.hash = "#tasks"; return; }
 
   const open = incompleteCountByCampaign(c.id);
   campaignTitleEl.textContent = c.name;
-  campaignMetaEl.textContent = `${formatCampaignDate(c)} / source: ${c.source_mode}`;
+  campaignMetaEl.textContent = `開始日：${c.start_date} / 返礼ルール数：${(c.rules||[]).length}`;
   campaignStatusPill.textContent = open > 0 ? `未完了 ${open}` : "未完了なし";
 
-  liveCard.classList.toggle("hidden", c.source_mode !== "internal");
-  externalCard.classList.toggle("hidden", c.source_mode !== "external");
-
-  renderLeaderboard(computeTotals(c));
-  renderKanban(c.id, kanbanEl);
-
+  renderLeaderboardForCampaign(c);
+  renderTaskList();
   setLiveMsg("");
 }
 
-/* --- Live input --- */
+/* ========= Live input ========= */
+const listenerNameInput = document.getElementById("listenerName");
+const customPointsInput = document.getElementById("customPoints");
+const liveMsg = document.getElementById("liveMsg");
+
+function setLiveMsg(msg){ if (liveMsg) liveMsg.textContent = msg || ""; }
+
 document.querySelectorAll("[data-add]").forEach(btn => {
   btn.addEventListener("click", () => addLog(parseInt(btn.getAttribute("data-add"), 10)));
 });
@@ -307,13 +407,15 @@ document.querySelectorAll("[data-add]").forEach(btn => {
 document.getElementById("addCustomBtn")?.addEventListener("click", () => {
   const v = parseInt(customPointsInput.value, 10);
   if (!v) return setLiveMsg("任意ptを入れて。");
-  addLog(v); customPointsInput.value = "";
+  addLog(v);
+  customPointsInput.value = "";
 });
 
 document.getElementById("subtractBtn")?.addEventListener("click", () => {
   const v = parseInt(customPointsInput.value, 10);
   if (!v) return setLiveMsg("訂正したいpt（正の数）を入れて。");
-  addLog(-Math.abs(v)); customPointsInput.value = "";
+  addLog(-Math.abs(v));
+  customPointsInput.value = "";
 });
 
 document.getElementById("undoBtn")?.addEventListener("click", () => undoLastLog());
@@ -321,7 +423,6 @@ document.getElementById("undoBtn")?.addEventListener("click", () => undoLastLog(
 function addLog(delta) {
   const c = getCurrentCampaign();
   if (!c) return;
-  if (c.source_mode !== "internal") return setLiveMsg("この企画は外部集計モードです。");
   const name = (listenerNameInput.value || "").trim();
   if (!name) return setLiveMsg("リスナー名を入力して。");
 
@@ -333,247 +434,63 @@ function addLog(delta) {
     created_at: new Date().toISOString(),
   });
   saveState();
-  renderCampaignDetail();
+
+  renderLeaderboardForCampaign(c);
+  renderTaskCampaignList();
   renderCampaigns();
   renderHome();
-  toast("投げ銭を反映");
+
+  setLiveMsg(`${delta>0?"+":""}${delta} を ${name} に反映`);
+  toast("反映");
 }
 
 function undoLastLog() {
   const c = getCurrentCampaign();
   if (!c) return;
-  if (c.source_mode !== "internal") return setLiveMsg("この企画は外部集計モードです。");
 
   for (let i = state.logs.length - 1; i >= 0; i--) {
     if (state.logs[i].campaign_id === c.id) {
       state.logs.splice(i, 1);
       saveState();
-      renderCampaignDetail();
+
+      renderLeaderboardForCampaign(c);
+      renderTaskCampaignList();
       renderCampaigns();
       renderHome();
+
       toast("Undo");
+      setLiveMsg("直近1件を取り消し");
       return;
     }
   }
   setLiveMsg("取り消すログがありません。");
 }
 
-/* --- External CSV --- */
-document.getElementById("importCsvBtn")?.addEventListener("click", () => {
-  const c = getCurrentCampaign();
-  if (!c || c.source_mode !== "external") return;
+/* ========= Tasks in campaign ========= */
+const createTaskForm = document.getElementById("createTaskForm");
+const taskListEl = document.getElementById("taskList");
 
-  const text = (csvText.value || "").trim();
-  if (!text) return alert("CSVが空です。");
+const taskSearchListener = document.getElementById("taskSearchListener");
+const taskSearchFrom = document.getElementById("taskSearchFrom");
+const taskSearchTo = document.getElementById("taskSearchTo");
+const clearTaskSearch = document.getElementById("clearTaskSearch");
 
-  const rows = text.split("\n")
-    .map(l => l.trim()).filter(Boolean)
-    .map(l => l.split(","))
-    .filter(p => p.length >= 2)
-    .map(p => ({ name: (p[0]||"").trim(), pts: parseInt((p[1]||"").trim(), 10) }))
-    .filter(x => x.name && Number.isFinite(x.pts));
-
-  if (!rows.length) return alert("有効な行がありません（name,total_points）。");
-
-  for (const r of rows) {
-    const ex = state.externalTotals.find(x => x.campaign_id === c.id && x.listener_name === r.name);
-    if (ex) {
-      ex.total_points = r.pts;
-      ex.updated_at = new Date().toISOString();
-    } else {
-      state.externalTotals.push({
-        id: uid(),
-        campaign_id: c.id,
-        listener_name: r.name,
-        total_points: r.pts,
-        updated_at: new Date().toISOString()
-      });
-    }
-  }
-
-  saveState();
-  renderCampaignDetail();
-  renderCampaigns();
-  renderHome();
-  toast("外部集計を更新");
+taskSearchListener?.addEventListener("input", renderTaskList);
+taskSearchFrom?.addEventListener("change", renderTaskList);
+taskSearchTo?.addEventListener("change", renderTaskList);
+clearTaskSearch?.addEventListener("click", () => {
+  taskSearchListener.value = "";
+  taskSearchFrom.value = "";
+  taskSearchTo.value = "";
+  renderTaskList();
 });
 
-document.getElementById("clearExternalBtn")?.addEventListener("click", () => {
-  const c = getCurrentCampaign();
-  if (!c || c.source_mode !== "external") return;
-  if (!confirm("この企画の外部集計データを全削除します。OK？")) return;
-
-  state.externalTotals = state.externalTotals.filter(x => x.campaign_id !== c.id);
-  saveState();
-  renderCampaignDetail();
-  renderHome();
-  toast("外部集計をクリア");
-});
-
-/* ========= Tasks (shared) ========= */
-const STATUS = ["todo","waiting","doing","ship","done"];
-const STATUS_LABEL = {
-  todo: "未着手",
-  waiting: "必要情報待ち",
-  doing: "制作/準備中",
-  ship: "納品/発送待ち",
-  done: "完了",
-};
-
-function renderKanban(campaignIdOrNull, mountEl, opts = {}) {
-  const { searchText = "", openOnly = false } = opts;
-
-  const q = searchText.trim().toLowerCase();
-  const tasks = state.tasks.filter(t => {
-    const inCampaign = campaignIdOrNull ? (t.campaign_id === campaignIdOrNull) : true;
-    if (!inCampaign) return false;
-    if (openOnly && t.status === "done") return false;
-
-    if (!q) return true;
-
-    const campaignName = t.campaign_id
-      ? (state.campaigns.find(c => c.id === t.campaign_id)?.name || "")
-      : "";
-    const hay = `${t.listener_name} ${t.title} ${campaignName}`.toLowerCase();
-    return hay.includes(q);
-  });
-
-  const grouped = Object.fromEntries(STATUS.map(s => [s, []]));
-  for (const t of tasks) grouped[t.status].push(t);
-  for (const s of STATUS) grouped[s].sort((a,b) => (b.updated_at||"").localeCompare(a.updated_at||""));
-
-  mountEl.innerHTML = STATUS.map(st => {
-    const list = grouped[st];
-    const cards = list.length ? list.map(t => {
-      const campaignName = t.campaign_id ? (state.campaigns.find(c => c.id === t.campaign_id)?.name || "（企画なし）") : "（企画なし）";
-      return `
-        <div class="task">
-          <div class="taskTitle">${escapeHtml(t.title)}</div>
-          <div class="taskSub">${escapeHtml(t.listener_name)} · ${escapeHtml(campaignName)}</div>
-          <div class="taskBtns">
-            ${STATUS.filter(x=>x!==st).map(to => `
-              <button class="btn ghost" type="button" data-move="${t.id}:${to}">→${STATUS_LABEL[to]}</button>
-            `).join("")}
-            <button class="btn danger" type="button" data-del="${t.id}">削除</button>
-          </div>
-        </div>
-      `;
-    }).join("") : `<div class="muted">なし</div>`;
-
-    return `
-      <div class="col">
-        <div class="colHead">
-          <div style="font-weight:850;">${STATUS_LABEL[st]}</div>
-          <div class="pill">${list.length}</div>
-        </div>
-        ${cards}
-      </div>
-    `;
-  }).join("");
-
-  mountEl.querySelectorAll("[data-move]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const [taskId, to] = btn.getAttribute("data-move").split(":");
-      const t = state.tasks.find(x => x.id === taskId);
-      if (!t) return;
-      t.status = to;
-      t.updated_at = new Date().toISOString();
-      saveState();
-
-      // 再描画（どの画面でも崩れない）
-      renderHome();
-      if (location.hash.startsWith("#campaign=")) renderCampaignDetail();
-      if (location.hash === "#tasks") renderTaskHub();
-      if (location.hash === "#campaigns") renderCampaigns();
-
-      toast("タスクを移動");
-    });
-  });
-
-  mountEl.querySelectorAll("[data-del]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const taskId = btn.getAttribute("data-del");
-      if (!confirm("このタスクを削除しますか？")) return;
-      state.tasks = state.tasks.filter(x => x.id !== taskId);
-      saveState();
-
-      renderHome();
-      if (location.hash.startsWith("#campaign=")) renderCampaignDetail();
-      if (location.hash === "#tasks") renderTaskHub();
-      if (location.hash === "#campaigns") renderCampaigns();
-
-      toast("タスクを削除");
-    });
-  });
-}
-
-/* --- Task Hub --- */
-const taskHubForm = document.getElementById("taskHubForm");
-const taskHubBoard = document.getElementById("taskHubBoard");
-const taskHubCampaign = document.getElementById("taskHubCampaign");
-const taskSearch = document.getElementById("taskSearch");
-const taskFilter = document.getElementById("taskFilter");
-
-function renderTaskHubCampaignOptions() {
-  if (!taskHubCampaign) return;
-
-  const current = taskHubCampaign.value || "";
-  const opts = [
-    `<option value="">（企画なし）</option>`,
-    ...state.campaigns.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
-  ].join("");
-  taskHubCampaign.innerHTML = opts;
-
-  if (Array.from(taskHubCampaign.options).some(o => o.value === current)) {
-    taskHubCampaign.value = current;
-  }
-}
-
-taskHubForm?.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const fd = new FormData(taskHubForm);
-  const campaign_id = (fd.get("campaign_id") || "").toString().trim() || null;
-  const listener_name = (fd.get("listener_name") || "").toString().trim();
-  const title = (fd.get("title") || "").toString().trim();
-  const status = fd.get("status");
-
-  if (!listener_name || !title) return;
-
-  state.tasks.unshift({
-    id: uid(),
-    campaign_id,
-    listener_name,
-    title,
-    status,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-  saveState();
-
-  taskHubForm.reset();
-  renderHome();
-  renderCampaigns();
-  renderTaskHub();
-  toast("タスクを追加");
-});
-
-taskSearch?.addEventListener("input", renderTaskHub);
-taskFilter?.addEventListener("change", renderTaskHub);
-
-function renderTaskHub() {
-  renderTaskHubCampaignOptions();
-  const openOnly = (taskFilter?.value || "open") === "open";
-  const q = taskSearch?.value || "";
-  renderKanban(null, taskHubBoard, { searchText: q, openOnly });
-}
-
-/* --- Campaign detail task creation --- */
-createTaskFormDetail?.addEventListener("submit", (e) => {
+createTaskForm?.addEventListener("submit", (e) => {
   e.preventDefault();
   const c = getCurrentCampaign();
   if (!c) return;
 
-  const fd = new FormData(createTaskFormDetail);
+  const fd = new FormData(createTaskForm);
   const listener_name = (fd.get("listener_name") || "").toString().trim();
   const title = (fd.get("title") || "").toString().trim();
   const status = fd.get("status");
@@ -591,23 +508,123 @@ createTaskFormDetail?.addEventListener("submit", (e) => {
   });
   saveState();
 
-  createTaskFormDetail.reset();
-  renderCampaignDetail();
+  createTaskForm.reset();
+  renderTaskList();
+  renderTaskCampaignList();
   renderCampaigns();
-  renderTaskHubCampaignOptions();
   renderHome();
-  toast("タスクを追加");
+  toast("タスク追加");
 });
+
+function matchesDateRange(taskISO, from, to) {
+  const d = byISODateOnly(taskISO);
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
+function renderTaskList() {
+  const c = getCurrentCampaign();
+  if (!c) return;
+
+  const q = (taskSearchListener.value || "").trim().toLowerCase();
+  const from = (taskSearchFrom.value || "").trim();
+  const to = (taskSearchTo.value || "").trim();
+
+  const tasks = state.tasks
+    .filter(t => t.campaign_id === c.id)
+    .filter(t => {
+      if (q && !(t.listener_name || "").toLowerCase().includes(q)) return false;
+      if (!matchesDateRange(t.created_at, from, to)) return false;
+      return true;
+    });
+
+  if (!tasks.length) {
+    taskListEl.innerHTML = `<div class="muted">該当タスクなし</div>`;
+    return;
+  }
+
+  taskListEl.innerHTML = tasks.map(t => {
+    const created = byISODateOnly(t.created_at);
+    const isDone = t.status === "done";
+    return `
+      <div class="taskItem">
+        <div class="taskTop">
+          <div>
+            <div class="taskTitle">${escapeHtml(t.title)}</div>
+            <div class="taskMeta">${escapeHtml(t.listener_name)} / ${created} / 状態：${escapeHtml(t.status)}</div>
+          </div>
+          <div class="taskBtns">
+            ${isDone
+              ? `<button class="btn ghost" type="button" data-undone="${t.id}">未完了に戻す</button>`
+              : `<button class="btn primary" type="button" data-done="${t.id}">完了</button>`
+            }
+            <button class="btn ghost" type="button" data-del="${t.id}">削除</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  taskListEl.querySelectorAll("[data-done]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-done");
+      const t = state.tasks.find(x => x.id === id);
+      if (!t) return;
+      t.status = "done";
+      t.updated_at = new Date().toISOString();
+      saveState();
+
+      renderCampaignDetail();
+      renderTaskCampaignList();
+      renderCampaigns();
+      renderHome();
+      toast("完了");
+    });
+  });
+
+  taskListEl.querySelectorAll("[data-undone]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-undone");
+      const t = state.tasks.find(x => x.id === id);
+      if (!t) return;
+      t.status = "todo";
+      t.updated_at = new Date().toISOString();
+      saveState();
+
+      renderCampaignDetail();
+      renderTaskCampaignList();
+      renderCampaigns();
+      renderHome();
+      toast("未完了に戻した");
+    });
+  });
+
+  taskListEl.querySelectorAll("[data-del]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-del");
+      if (!confirm("このタスクを削除しますか？")) return;
+      state.tasks = state.tasks.filter(x => x.id !== id);
+      saveState();
+
+      renderCampaignDetail();
+      renderTaskCampaignList();
+      renderCampaigns();
+      renderHome();
+      toast("削除");
+    });
+  });
+}
 
 /* ========= Backup / Restore ========= */
 document.getElementById("exportBtn")?.addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `gift-manager-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `reward-task-backup-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  toast("バックアップを書き出し");
+  toast("バックアップ");
 });
 
 document.getElementById("importFile")?.addEventListener("change", async (e) => {
@@ -619,7 +636,6 @@ document.getElementById("importFile")?.addEventListener("change", async (e) => {
     state = {
       campaigns: Array.isArray(obj.campaigns) ? obj.campaigns : [],
       logs: Array.isArray(obj.logs) ? obj.logs : [],
-      externalTotals: Array.isArray(obj.externalTotals) ? obj.externalTotals : [],
       tasks: Array.isArray(obj.tasks) ? obj.tasks : [],
     };
     saveState();
@@ -633,6 +649,5 @@ document.getElementById("importFile")?.addEventListener("change", async (e) => {
 });
 
 /* ========= Init ========= */
-renderTaskHubCampaignOptions();
 parseHash();
 renderHome();
