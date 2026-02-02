@@ -1,30 +1,49 @@
 /* ========= State ========= */
-const STORAGE_KEY = "gift_manager_v4";
+const STORAGE_KEY = "gift_manager_v5";
 
-// v3/v2から移行（あれば）
+/**
+ * v4/v3/v2 から最低限移行
+ * - campaigns: id, name, start_date, rules
+ * - logs: campaign_id, listener_name, delta_points, created_at
+ * - tasks: campaign_id, listener_name, title, status, created_at, updated_at
+ */
 function migrate() {
   if (localStorage.getItem(STORAGE_KEY)) return;
 
-  const v3 = localStorage.getItem("gift_manager_v3");
-  const v2 = localStorage.getItem("gift_manager_v2");
-  const src = v3 || v2;
-  if (src) {
+  const candidates = ["gift_manager_v4", "gift_manager_v3", "gift_manager_v2"];
+  for (const key of candidates) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
     try {
-      const s = JSON.parse(src);
-      // 旧campaignにsource_modeがあっても無視して内部入力化
-      const migrated = {
-        campaigns: (Array.isArray(s.campaigns) ? s.campaigns : []).map(c => ({
-          id: c.id || uid(),
-          name: c.name || "無名企画",
-          start_date: c.start_date || "",
-          // v4: rules を持つ（無ければ空）
-          rules: Array.isArray(c.rules) ? c.rules : [],
-          created_at: c.created_at || new Date().toISOString(),
-        })),
-        logs: Array.isArray(s.logs) ? s.logs : [],
-        tasks: Array.isArray(s.tasks) ? s.tasks : [],
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      const s = JSON.parse(raw);
+
+      const campaigns = (Array.isArray(s.campaigns) ? s.campaigns : []).map(c => ({
+        id: c.id || uid(),
+        name: c.name || "無名企画",
+        start_date: c.start_date || "",
+        rules: Array.isArray(c.rules) ? c.rules : [],
+        created_at: c.created_at || new Date().toISOString(),
+      }));
+
+      const logs = (Array.isArray(s.logs) ? s.logs : []).map(l => ({
+        id: l.id || uid(),
+        campaign_id: l.campaign_id || l.campaign || "",
+        listener_name: (l.listener_name || l.name || "").toString(),
+        delta_points: Number.isFinite(l.delta_points) ? l.delta_points : (Number(l.pt) || 0),
+        created_at: l.created_at || new Date().toISOString(),
+      }));
+
+      const tasks = (Array.isArray(s.tasks) ? s.tasks : []).map(t => ({
+        id: t.id || uid(),
+        campaign_id: t.campaign_id || t.campaign || "",
+        listener_name: (t.listener_name || t.listener || "").toString(),
+        title: (t.title || "").toString(),
+        status: (t.status || "todo").toString(),
+        created_at: t.created_at || new Date().toISOString(),
+        updated_at: t.updated_at || new Date().toISOString(),
+      }));
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ campaigns, logs, tasks }));
       return;
     } catch {}
   }
@@ -55,11 +74,7 @@ function escapeHtml(s) {
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[c]));
 }
-
-function byISODateOnly(iso) {
-  // "2026-02-02T..." -> "2026-02-02"
-  return (iso || "").slice(0, 10);
-}
+function byISODateOnly(iso) { return (iso || "").slice(0, 10); }
 
 /* ========= Toast ========= */
 const toastEl = document.getElementById("toast");
@@ -69,7 +84,7 @@ function toast(msg) {
   toastEl.textContent = msg;
   toastEl.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 1500);
+  toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 1400);
 }
 
 /* ========= Views ========= */
@@ -79,13 +94,10 @@ const views = {
   campaigns: document.getElementById("view-campaigns"),
   campaign: document.getElementById("view-campaign"),
 };
-
 function showView(name) {
   Object.entries(views).forEach(([k, el]) => el.classList.toggle("hidden", k !== name));
   setActiveNav(name);
 }
-
-/* ========= Nav Active ========= */
 function setActiveNav(viewName) {
   document.querySelectorAll(".navlink").forEach(a => a.classList.remove("active"));
   const map = { home:"home", tasks:"tasks", campaigns:"campaigns", campaign:"tasks" };
@@ -139,7 +151,6 @@ function overallCounts() {
   const done = state.tasks.filter(t => t.status === "done").length;
   return { open, done };
 }
-
 function renderHome() {
   const { open, done } = overallCounts();
   statCampaigns.textContent = String(state.campaigns.length);
@@ -148,11 +159,7 @@ function renderHome() {
   overallPill.textContent = open > 0 ? `未完了 ${open}` : "未完了なし";
 }
 
-/* ========= Reward rules ========= */
-/**
- * rules: [{ threshold: number, reward: string }]
- * returns matched reward (highest threshold <= points), else ""
- */
+/* ========= Rewards ========= */
 function getRewardForPoints(rules, points) {
   const sorted = (Array.isArray(rules) ? rules : [])
     .filter(r => Number.isFinite(r.threshold) && (r.reward || "").trim())
@@ -171,28 +178,25 @@ function getRewardForPoints(rules, points) {
 function computeTotalsForCampaign(campaignId) {
   const map = new Map();
   for (const log of state.logs.filter(l => l.campaign_id === campaignId)) {
-    const name = (l.listener_name || "").trim();
+    const name = (log.listener_name || "").trim();
     if (!name) continue;
-    map.set(name, (map.get(name) || 0) + (l.delta_points || 0));
+    map.set(name, (map.get(name) || 0) + (log.delta_points || 0));
   }
   const rows = Array.from(map.entries()).map(([listener_name, points]) => ({ listener_name, points }));
   rows.sort((a,b) => b.points - a.points || a.listener_name.localeCompare(b.listener_name));
   return rows;
 }
-
 function incompleteCountByCampaign(campaignId) {
   return state.tasks.filter(t => t.campaign_id === campaignId && t.status !== "done").length;
 }
 
-/* ========= Campaign creation (rules) ========= */
+/* ========= Campaign creation rules UI ========= */
 const rulesBox = document.getElementById("rulesBox");
 const addRuleRowBtn = document.getElementById("addRuleRowBtn");
 
-function addRuleRow(threshold = "", reward = "") {
-  const rowId = uid();
+function addRuleRow(container, threshold = "", reward = "") {
   const el = document.createElement("div");
   el.className = "ruleRow";
-  el.dataset.rowid = rowId;
   el.innerHTML = `
     <label class="field">
       <span>ポイント</span>
@@ -207,19 +211,16 @@ function addRuleRow(threshold = "", reward = "") {
       <button class="btn ghost" type="button" data-del>削除</button>
     </div>
   `;
-  el.querySelector("[data-del]").addEventListener("click", () => {
-    el.remove();
-  });
-  rulesBox.appendChild(el);
+  el.querySelector("[data-del]").addEventListener("click", () => el.remove());
+  container.appendChild(el);
 }
 
-addRuleRowBtn?.addEventListener("click", () => addRuleRow("", ""));
+addRuleRowBtn?.addEventListener("click", () => addRuleRow(rulesBox, "", ""));
 
-// 初期3行（使わないなら空でもOK）
-if (rulesBox) {
-  addRuleRow("1000", "デジグッズA");
-  addRuleRow("3000", "デジグッズB");
-  addRuleRow("5000", "リアルグッズ発送");
+// 初期行
+if (rulesBox && rulesBox.children.length === 0) {
+  addRuleRow(rulesBox, "1000", "デジグッズA");
+  addRuleRow(rulesBox, "3000", "デジグッズB");
 }
 
 /* ========= Campaigns ========= */
@@ -236,14 +237,7 @@ createCampaignForm?.addEventListener("submit", (e) => {
   const start_date = (fd.get("start_date") || "").toString().trim();
   if (!name || !start_date) return;
 
-  // rules collect
-  const rules = [];
-  rulesBox.querySelectorAll(".ruleRow").forEach(row => {
-    const th = parseInt(row.querySelector("[data-threshold]")?.value, 10);
-    const rw = (row.querySelector("[data-reward]")?.value || "").toString().trim();
-    if (Number.isFinite(th) && rw) rules.push({ threshold: th, reward: rw });
-  });
-  rules.sort((a,b) => a.threshold - b.threshold);
+  const rules = collectRulesFrom(rulesBox);
 
   state.campaigns.unshift({
     id: uid(),
@@ -255,12 +249,20 @@ createCampaignForm?.addEventListener("submit", (e) => {
   saveState();
 
   createCampaignForm.reset();
-  // ルールは残す（毎回ゼロから入力したくない想定）。消したければここでrulesBoxを初期化して。
-  renderCampaigns();
-  renderTaskCampaignList();
-  renderHome();
+  renderAll();
   toast("企画を作成");
 });
+
+function collectRulesFrom(container) {
+  const rules = [];
+  container.querySelectorAll(".ruleRow").forEach(row => {
+    const th = parseInt(row.querySelector("[data-threshold]")?.value, 10);
+    const rw = (row.querySelector("[data-reward]")?.value || "").toString().trim();
+    if (Number.isFinite(th) && rw) rules.push({ threshold: th, reward: rw });
+  });
+  rules.sort((a,b) => a.threshold - b.threshold);
+  return rules;
+}
 
 function renderCampaigns() {
   const q = (campaignSearchEl?.value || "").trim().toLowerCase();
@@ -276,8 +278,12 @@ function renderCampaigns() {
     const open = incompleteCountByCampaign(c.id);
     const icon = open > 0 ? "🔴" : "✅";
     const totals = computeTotalsForCampaign(c.id);
-    const top = totals.slice(0, 2).map(r => `${escapeHtml(r.listener_name)} ${r.points}pt`).join(" / ");
-    const ruleSummary = (c.rules || []).slice(0, 2).map(r => `${r.threshold}→${escapeHtml(r.reward)}`).join(" / ");
+    const top = totals.slice(0, 2).map(r => {
+      const reward = getRewardForPoints(c.rules, r.points);
+      return `${escapeHtml(r.listener_name)} ${r.points}pt（${escapeHtml(reward || "—")}）`;
+    }).join(" / ");
+    const rulesSummary = (c.rules || []).slice(0, 2).map(r => `${r.threshold}→${escapeHtml(r.reward)}`).join(" / ");
+
     return `
       <div class="item">
         <div>
@@ -285,15 +291,38 @@ function renderCampaigns() {
             <a href="#campaign=${c.id}"><strong>${escapeHtml(c.name)}</strong></a>
             <span class="badge">${escapeHtml(c.start_date)}</span>
           </div>
-          <div class="muted">未完了 ${open} · 上位: ${top || "—"} · ルール: ${ruleSummary || "—"}</div>
+          <div class="muted">未完了 ${open} · 上位: ${top || "—"} · ルール: ${rulesSummary || "—"}</div>
         </div>
-        <div style="font-size:18px;">${icon}</div>
+        <div class="itemActions">
+          <button class="btn ghost small" type="button" data-c-edit="${c.id}">編集</button>
+          <button class="btn danger small" type="button" data-c-del="${c.id}">削除</button>
+          <div style="font-size:18px;">${icon}</div>
+        </div>
       </div>
     `;
   }).join("");
+
+  campaignListEl.querySelectorAll("[data-c-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-c-edit");
+      location.hash = `#campaign=${id}`;
+      // campaign側で編集パネル開ける
+      setTimeout(() => openCampaignEditPanel(true), 0);
+    });
+  });
+
+  campaignListEl.querySelectorAll("[data-c-del]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-c-del");
+      const c = state.campaigns.find(x => x.id === id);
+      if (!c) return;
+      if (!confirm(`「${c.name}」を削除します。関連ログ/タスクも消えます。OK？`)) return;
+      deleteCampaign(id);
+    });
+  });
 }
 
-/* ========= Task management: Campaign list ========= */
+/* ========= Task management: campaign list ========= */
 const taskCampaignListEl = document.getElementById("taskCampaignList");
 const tasksCampaignSearchEl = document.getElementById("tasksCampaignSearch");
 tasksCampaignSearchEl?.addEventListener("input", renderTaskCampaignList);
@@ -312,7 +341,6 @@ function renderTaskCampaignList() {
     const open = incompleteCountByCampaign(c.id);
     const icon = open > 0 ? "🔴" : "✅";
     const totals = computeTotalsForCampaign(c.id);
-    // 企画ごとに「ポイント＆返礼品」をすぐ見れるよう、上位2名だけ表示（重くしない）
     const top2 = totals.slice(0, 2).map(r => {
       const reward = getRewardForPoints(c.rules, r.points);
       return `${escapeHtml(r.listener_name)} ${r.points}pt（${escapeHtml(reward || "—")}）`;
@@ -337,46 +365,82 @@ const campaignTitleEl = document.getElementById("campaignTitle");
 const campaignMetaEl = document.getElementById("campaignMeta");
 const campaignStatusPill = document.getElementById("campaignStatusPill");
 const deleteCampaignBtn = document.getElementById("deleteCampaignBtn");
+const editCampaignBtn = document.getElementById("editCampaignBtn");
+
+const campaignEditPanel = document.getElementById("campaignEditPanel");
+const editCampaignForm = document.getElementById("editCampaignForm");
+const cancelEditCampaignBtn = document.getElementById("cancelEditCampaignBtn");
+const editRulesBox = document.getElementById("editRulesBox");
+const editAddRuleRowBtn = document.getElementById("editAddRuleRowBtn");
+
 const leaderboardBody = document.getElementById("leaderboardBody");
 
 function getCurrentCampaign() {
   return state.campaigns.find(c => c.id === currentCampaignId) || null;
 }
 
+function deleteCampaign(campaignId) {
+  state.campaigns = state.campaigns.filter(x => x.id !== campaignId);
+  state.logs = state.logs.filter(x => x.campaign_id !== campaignId);
+  state.tasks = state.tasks.filter(x => x.campaign_id !== campaignId);
+  saveState();
+  renderAll();
+  toast("削除");
+}
+
 deleteCampaignBtn?.addEventListener("click", () => {
   const c = getCurrentCampaign();
   if (!c) return;
   if (!confirm(`「${c.name}」を削除します。関連ログ/タスクも消えます。OK？`)) return;
-
-  state.campaigns = state.campaigns.filter(x => x.id !== c.id);
-  state.logs = state.logs.filter(x => x.campaign_id !== c.id);
-  state.tasks = state.tasks.filter(x => x.campaign_id !== c.id);
-  saveState();
-
-  renderHome();
-  renderCampaigns();
-  renderTaskCampaignList();
+  deleteCampaign(c.id);
   location.hash = "#tasks";
-  toast("企画を削除");
 });
 
-function renderLeaderboardForCampaign(c) {
-  const totals = computeTotalsForCampaign(c.id);
-  if (!totals.length) {
-    leaderboardBody.innerHTML = `<tr><td colspan="3" class="muted">データなし</td></tr>`;
-    return;
-  }
+function openCampaignEditPanel(open) {
+  if (!campaignEditPanel) return;
+  campaignEditPanel.classList.toggle("hidden", !open);
+}
 
-  leaderboardBody.innerHTML = totals.map(r => {
-    const reward = getRewardForPoints(c.rules, r.points);
-    return `
-      <tr>
-        <td>${escapeHtml(r.listener_name)}</td>
-        <td class="right">${r.points}</td>
-        <td>${escapeHtml(reward || "—")}</td>
-      </tr>
-    `;
-  }).join("");
+editCampaignBtn?.addEventListener("click", () => {
+  openCampaignEditPanel(campaignEditPanel.classList.contains("hidden"));
+});
+
+cancelEditCampaignBtn?.addEventListener("click", () => openCampaignEditPanel(false));
+
+editAddRuleRowBtn?.addEventListener("click", () => addRuleRow(editRulesBox, "", ""));
+
+editCampaignForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const c = getCurrentCampaign();
+  if (!c) return;
+
+  const fd = new FormData(editCampaignForm);
+  const name = (fd.get("name") || "").toString().trim();
+  const start_date = (fd.get("start_date") || "").toString().trim();
+  if (!name || !start_date) return;
+
+  c.name = name;
+  c.start_date = start_date;
+  c.rules = collectRulesFrom(editRulesBox);
+
+  saveState();
+  renderAll();
+  toast("保存");
+  openCampaignEditPanel(false);
+});
+
+function renderCampaignEditForm(c) {
+  if (!editCampaignForm) return;
+  editCampaignForm.elements["name"].value = c.name;
+  editCampaignForm.elements["start_date"].value = c.start_date;
+
+  editRulesBox.innerHTML = "";
+  const rules = Array.isArray(c.rules) ? c.rules : [];
+  if (rules.length === 0) {
+    addRuleRow(editRulesBox, "", "");
+  } else {
+    for (const r of rules) addRuleRow(editRulesBox, String(r.threshold), r.reward);
+  }
 }
 
 function renderCampaignDetail() {
@@ -388,36 +452,117 @@ function renderCampaignDetail() {
   campaignMetaEl.textContent = `開始日：${c.start_date} / 返礼ルール数：${(c.rules||[]).length}`;
   campaignStatusPill.textContent = open > 0 ? `未完了 ${open}` : "未完了なし";
 
+  renderCampaignEditForm(c);
   renderLeaderboardForCampaign(c);
   renderTaskList();
   setLiveMsg("");
+}
+
+/* ========= Listener CRUD ========= */
+function renameListener(campaignId, oldName, newName) {
+  const oldN = (oldName || "").trim();
+  const newN = (newName || "").trim();
+  if (!oldN || !newN) return false;
+  if (oldN === newN) return true;
+
+  // logs
+  for (const l of state.logs) {
+    if (l.campaign_id === campaignId && (l.listener_name || "").trim() === oldN) {
+      l.listener_name = newN;
+    }
+  }
+  // tasks
+  for (const t of state.tasks) {
+    if (t.campaign_id === campaignId && (t.listener_name || "").trim() === oldN) {
+      t.listener_name = newN;
+      t.updated_at = new Date().toISOString();
+    }
+  }
+  return true;
+}
+
+function deleteListener(campaignId, name) {
+  const n = (name || "").trim();
+  if (!n) return;
+  state.logs = state.logs.filter(l => !(l.campaign_id === campaignId && (l.listener_name || "").trim() === n));
+  state.tasks = state.tasks.filter(t => !(t.campaign_id === campaignId && (t.listener_name || "").trim() === n));
+}
+
+/* ========= Leaderboard ========= */
+function renderLeaderboardForCampaign(c) {
+  const totals = computeTotalsForCampaign(c.id);
+  if (!totals.length) {
+    leaderboardBody.innerHTML = `<tr><td colspan="4" class="muted">データなし</td></tr>`;
+    return;
+  }
+
+  leaderboardBody.innerHTML = totals.map(r => {
+    const reward = getRewardForPoints(c.rules, r.points);
+    return `
+      <tr>
+        <td>${escapeHtml(r.listener_name)}</td>
+        <td class="right">${r.points}</td>
+        <td>${escapeHtml(reward || "—")}</td>
+        <td>
+          <button class="btn ghost small" type="button" data-l-edit="${escapeHtml(r.listener_name)}">編集</button>
+          <button class="btn danger small" type="button" data-l-del="${escapeHtml(r.listener_name)}">削除</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  // edit listener name
+  leaderboardBody.querySelectorAll("[data-l-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const c = getCurrentCampaign();
+      if (!c) return;
+      const oldName = btn.getAttribute("data-l-edit");
+      const newName = prompt(`リスナー名を変更\n\n「${oldName}」→`, oldName);
+      if (newName === null) return;
+      if (!newName.trim()) return alert("空は不可");
+      renameListener(c.id, oldName, newName.trim());
+      saveState();
+      renderAll();
+      toast("変更");
+    });
+  });
+
+  // delete listener (logs+tasks)
+  leaderboardBody.querySelectorAll("[data-l-del]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const c = getCurrentCampaign();
+      if (!c) return;
+      const name = btn.getAttribute("data-l-del");
+      if (!confirm(`リスナー「${name}」を削除します。\nこの企画の投げ銭ログとタスクも削除されます。OK？`)) return;
+      deleteListener(c.id, name);
+      saveState();
+      renderAll();
+      toast("削除");
+    });
+  });
 }
 
 /* ========= Live input ========= */
 const listenerNameInput = document.getElementById("listenerName");
 const customPointsInput = document.getElementById("customPoints");
 const liveMsg = document.getElementById("liveMsg");
-
 function setLiveMsg(msg){ if (liveMsg) liveMsg.textContent = msg || ""; }
 
 document.querySelectorAll("[data-add]").forEach(btn => {
   btn.addEventListener("click", () => addLog(parseInt(btn.getAttribute("data-add"), 10)));
 });
-
 document.getElementById("addCustomBtn")?.addEventListener("click", () => {
   const v = parseInt(customPointsInput.value, 10);
   if (!v) return setLiveMsg("任意ptを入れて。");
   addLog(v);
   customPointsInput.value = "";
 });
-
 document.getElementById("subtractBtn")?.addEventListener("click", () => {
   const v = parseInt(customPointsInput.value, 10);
   if (!v) return setLiveMsg("訂正したいpt（正の数）を入れて。");
   addLog(-Math.abs(v));
   customPointsInput.value = "";
 });
-
 document.getElementById("undoBtn")?.addEventListener("click", () => undoLastLog());
 
 function addLog(delta) {
@@ -435,11 +580,7 @@ function addLog(delta) {
   });
   saveState();
 
-  renderLeaderboardForCampaign(c);
-  renderTaskCampaignList();
-  renderCampaigns();
-  renderHome();
-
+  renderAll();
   setLiveMsg(`${delta>0?"+":""}${delta} を ${name} に反映`);
   toast("反映");
 }
@@ -452,12 +593,7 @@ function undoLastLog() {
     if (state.logs[i].campaign_id === c.id) {
       state.logs.splice(i, 1);
       saveState();
-
-      renderLeaderboardForCampaign(c);
-      renderTaskCampaignList();
-      renderCampaigns();
-      renderHome();
-
+      renderAll();
       toast("Undo");
       setLiveMsg("直近1件を取り消し");
       return;
@@ -493,7 +629,7 @@ createTaskForm?.addEventListener("submit", (e) => {
   const fd = new FormData(createTaskForm);
   const listener_name = (fd.get("listener_name") || "").toString().trim();
   const title = (fd.get("title") || "").toString().trim();
-  const status = fd.get("status");
+  const status = (fd.get("status") || "todo").toString();
 
   if (!listener_name || !title) return;
 
@@ -509,10 +645,7 @@ createTaskForm?.addEventListener("submit", (e) => {
   saveState();
 
   createTaskForm.reset();
-  renderTaskList();
-  renderTaskCampaignList();
-  renderCampaigns();
-  renderHome();
+  renderAll();
   toast("タスク追加");
 });
 
@@ -556,10 +689,11 @@ function renderTaskList() {
           </div>
           <div class="taskBtns">
             ${isDone
-              ? `<button class="btn ghost" type="button" data-undone="${t.id}">未完了に戻す</button>`
-              : `<button class="btn primary" type="button" data-done="${t.id}">完了</button>`
+              ? `<button class="btn ghost small" type="button" data-undone="${t.id}">未完了に戻す</button>`
+              : `<button class="btn primary small" type="button" data-done="${t.id}">完了</button>`
             }
-            <button class="btn ghost" type="button" data-del="${t.id}">削除</button>
+            <button class="btn ghost small" type="button" data-edit="${t.id}">編集</button>
+            <button class="btn danger small" type="button" data-del="${t.id}">削除</button>
           </div>
         </div>
       </div>
@@ -574,11 +708,7 @@ function renderTaskList() {
       t.status = "done";
       t.updated_at = new Date().toISOString();
       saveState();
-
-      renderCampaignDetail();
-      renderTaskCampaignList();
-      renderCampaigns();
-      renderHome();
+      renderAll();
       toast("完了");
     });
   });
@@ -591,12 +721,31 @@ function renderTaskList() {
       t.status = "todo";
       t.updated_at = new Date().toISOString();
       saveState();
+      renderAll();
+      toast("未完了");
+    });
+  });
 
-      renderCampaignDetail();
-      renderTaskCampaignList();
-      renderCampaigns();
-      renderHome();
-      toast("未完了に戻した");
+  taskListEl.querySelectorAll("[data-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-edit");
+      const t = state.tasks.find(x => x.id === id);
+      if (!t) return;
+
+      const newTitle = prompt("タスク内容を編集", t.title);
+      if (newTitle === null) return;
+      if (!newTitle.trim()) return alert("空は不可");
+
+      const newListener = prompt("リスナー名を編集", t.listener_name);
+      if (newListener === null) return;
+      if (!newListener.trim()) return alert("空は不可");
+
+      t.title = newTitle.trim();
+      t.listener_name = newListener.trim();
+      t.updated_at = new Date().toISOString();
+      saveState();
+      renderAll();
+      toast("編集");
     });
   });
 
@@ -606,11 +755,7 @@ function renderTaskList() {
       if (!confirm("このタスクを削除しますか？")) return;
       state.tasks = state.tasks.filter(x => x.id !== id);
       saveState();
-
-      renderCampaignDetail();
-      renderTaskCampaignList();
-      renderCampaigns();
-      renderHome();
+      renderAll();
       toast("削除");
     });
   });
@@ -639,8 +784,9 @@ document.getElementById("importFile")?.addEventListener("change", async (e) => {
       tasks: Array.isArray(obj.tasks) ? obj.tasks : [],
     };
     saveState();
-    toast("復元しました");
+    toast("復元");
     parseHash();
+    renderAll();
   }catch{
     alert("復元に失敗：JSONが不正です。");
   }finally{
@@ -648,6 +794,21 @@ document.getElementById("importFile")?.addEventListener("change", async (e) => {
   }
 });
 
-/* ========= Init ========= */
-parseHash();
-renderHome();
+/* ========= Global render ========= */
+function renderAll() {
+  // どの画面でも正しく更新されるように強制
+  renderHome();
+  renderCampaigns();
+  renderTaskCampaignList();
+
+  if ((location.hash || "").startsWith("#campaign=")) {
+    renderCampaignDetail();
+  }
+}
+
+function safeInit() {
+  // 一覧が出ない事故対策：初期描画を強制
+  parseHash();
+  renderAll();
+}
+safeInit();
