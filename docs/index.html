@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gift Manager</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>Gift Manager</h1>
+  <div class="muted">GitHub Pages / ブラウザ保存</div>
+</header>
+
+<main id="view-list" class="container">
+  <section class="card">
+    <h2>企画一覧</h2>
+    <div id="campaignList"></div>
+  </section>
+
+  <section class="card">
+    <h2>企画作成</h2>
+    <form id="createCampaignForm">
+      <input name="name" placeholder="企画名" required>
+      <select name="date_mode" id="dateMode">
+        <option value="single">単日</option>
+        <option value="range">期間</option>
+      </select>
+      <input type="date" name="start_date" required>
+      <input type="date" name="end_date" id="endDate" style="display:none;">
+      <select name="source_mode">
+        <option value="internal">内部入力</option>
+        <option value="external">外部集計</option>
+      </select>
+      <button>作成</button>
+    </form>
+  </section>
+</main>
+
+<main id="view-campaign" class="container hidden">
+  <button id="backBtn">← 戻る</button>
+  <h2 id="campaignTitle"></h2>
+  <p id="campaignMeta" class="muted"></p>
+
+  <section class="card">
+    <h3>リーダーボード</h3>
+    <table>
+      <tbody id="leaderboard"></tbody>
+    </table>
+  </section>
+
+  <section id="liveInput" class="card">
+    <h3>ライブ入力</h3>
+    <input id="listenerName" placeholder="リスナー名">
+    <button data-add="100">+100</button>
+    <button data-add="500">+500</button>
+    <button id="undoBtn">Undo</button>
+  </section>
+
+  <section class="card">
+    <h3>タスク</h3>
+    <form id="taskForm">
+      <input name="listener" placeholder="名前" required>
+      <input name="title" placeholder="内容" required>
+      <button>追加</button>
+    </form>
+    <div id="tasks"></div>
+  </section>
+</main>
+
+<script src="./app.js"></script>
+</body>
+</html>
