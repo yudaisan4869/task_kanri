@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Gift Manager</title>
+  <title>返礼品タスクマネージャー</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="wrap topbar-inner">
       <div class="brand">
-        <div class="logo">GM</div>
+        <div class="logo">返</div>
         <div>
-          <div class="brand-name">Gift Manager</div>
-          <div class="brand-sub">投げ銭ログ / 返礼タスク（ブラウザ保存）</div>
+          <div class="brand-name">返礼品タスクマネージャー</div>
+          <div class="brand-sub">GitHub Pages / ブラウザ保存</div>
         </div>
       </div>
 
@@ -36,20 +36,19 @@
   <!-- ===== HOME ===== -->
   <main id="view-home" class="wrap stack">
     <section class="hero">
-      <div class="hero-title">最初にやりたいことを選ぶ</div>
-      <div class="hero-sub">配信中はタスク確認・配信後は企画作成とログ入力、みたいに使い分け</div>
+      <div class="hero-title">やりたいことを選ぶ</div>
 
       <div class="choice-grid">
         <a class="choice-card" href="#tasks">
           <div class="choice-icon">✅</div>
           <div class="choice-main">タスク管理</div>
-          <div class="choice-sub">漏れゼロに寄せる。未完了を一望して、移動・完了。</div>
+          <div class="choice-sub">企画を選んで返礼タスクを消し込む</div>
         </a>
 
         <a class="choice-card" href="#campaigns">
           <div class="choice-icon">📌</div>
           <div class="choice-main">企画作成</div>
-          <div class="choice-sub">企画を作って、投げ銭を入力→合計と順位を即確認。</div>
+          <div class="choice-sub">企画と返礼ルールを作る</div>
         </a>
       </div>
     </section>
@@ -57,7 +56,7 @@
     <section class="grid2">
       <section class="card">
         <div class="card-head">
-          <div class="card-title">今の状況</div>
+          <div class="card-title">状況</div>
           <div class="pill" id="overallPill">—</div>
         </div>
         <div class="stats">
@@ -74,79 +73,38 @@
             <div class="stat-label">完了タスク</div>
           </div>
         </div>
-        <div class="muted">※ データはこのブラウザに保存。端末やブラウザを変えると同期されない。</div>
       </section>
 
       <section class="card">
         <div class="card-head">
-          <div class="card-title">クイック操作</div>
-          <div class="muted">よく使う操作を最短に</div>
+          <div class="card-title">注意</div>
         </div>
-        <div class="stack">
-          <button class="btn primary" id="quickNewTask">タスクをすぐ追加</button>
-          <button class="btn" id="quickNewCampaign">企画をすぐ作成</button>
+        <div class="muted">
+          ・保存先はこのブラウザ（localStorage）です。端末/ブラウザを変えると同期されません。<br/>
+          ・定期的に「バックアップ」推奨。
         </div>
       </section>
     </section>
   </main>
 
-  <!-- ===== TASK HUB ===== -->
+  <!-- ===== TASKS (Campaign list) ===== -->
   <main id="view-tasks" class="wrap stack hidden">
     <section class="pagehead">
       <div>
         <div class="h1">タスク管理</div>
-        <div class="muted">企画を跨いで“未完了”を潰す画面</div>
+        <div class="muted">企画一覧 → 押して詳細へ</div>
       </div>
       <div class="row gap">
-        <input id="taskSearch" class="input" placeholder="検索：リスナー名 / タスク内容 / 企画名" />
-        <select id="taskFilter" class="input">
-          <option value="open">未完了のみ</option>
-          <option value="all">すべて</option>
-        </select>
+        <input id="tasksCampaignSearch" class="input" placeholder="企画名で検索" />
       </div>
     </section>
 
     <section class="card">
       <div class="card-head">
-        <div class="card-title">タスク追加</div>
-        <div class="muted">企画なしでもOK（“タスクだけ管理”運用対応）</div>
+        <div class="card-title">企画一覧</div>
+        <div class="muted">🔴=未完了あり / ✅=未完了なし</div>
       </div>
-      <form id="taskHubForm" class="grid3">
-        <label class="field">
-          <span>企画（任意）</span>
-          <select name="campaign_id" id="taskHubCampaign" class="input"></select>
-        </label>
-        <label class="field">
-          <span>リスナー名</span>
-          <input name="listener_name" class="input" required placeholder="例：Alice" />
-        </label>
-        <label class="field">
-          <span>内容</span>
-          <input name="title" class="input" required placeholder="例：デジ送付 / 住所回収 / 梱包" />
-        </label>
-        <label class="field">
-          <span>状態</span>
-          <select name="status" class="input">
-            <option value="todo">未着手</option>
-            <option value="waiting">必要情報待ち</option>
-            <option value="doing">制作/準備中</option>
-            <option value="ship">納品/発送待ち</option>
-            <option value="done">完了</option>
-          </select>
-        </label>
-        <div class="field">
-          <span>&nbsp;</span>
-          <button class="btn primary" type="submit">追加</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <div class="card-title">ボード</div>
-        <div class="muted">ボタンで状態移動（ドラッグ無しでも迷わない）</div>
-      </div>
-      <div id="taskHubBoard" class="kanban"></div>
+      <div id="taskCampaignList" class="list"></div>
     </section>
   </main>
 
@@ -155,11 +113,10 @@
     <section class="pagehead">
       <div>
         <div class="h1">企画作成</div>
-        <div class="muted">企画を作って管理（単日/期間、内部入力/外部集計）</div>
+        <div class="muted">内部入力のみ（配信中に加算 → 自動集計）</div>
       </div>
       <div class="row gap">
         <input id="campaignSearch" class="input" placeholder="企画名で検索" />
-        <a class="btn primary" href="#campaigns" id="scrollToCreate">企画を作る</a>
       </div>
     </section>
 
@@ -167,7 +124,7 @@
       <section class="card">
         <div class="card-head">
           <div class="card-title">企画一覧</div>
-          <div class="muted">✅=未完了なし / 🔴=未完了タスクあり</div>
+          <div class="muted">作成済み企画</div>
         </div>
         <div id="campaignList" class="list"></div>
       </section>
@@ -175,20 +132,13 @@
       <section class="card" id="createCampaignCard">
         <div class="card-head">
           <div class="card-title">新規企画</div>
-          <div class="muted">まずは企画を作る。あとから入力すればOK。</div>
+          <div class="muted">ポイント→返礼品（複数ルール可）</div>
         </div>
-        <form id="createCampaignForm" class="grid2">
+
+        <form id="createCampaignForm" class="stack">
           <label class="field">
             <span>企画名</span>
             <input class="input" name="name" required placeholder="例：2月デジグッズ企画" />
-          </label>
-
-          <label class="field">
-            <span>日付モード</span>
-            <select class="input" name="date_mode" id="date_mode">
-              <option value="single">単日</option>
-              <option value="range">期間</option>
-            </select>
           </label>
 
           <label class="field">
@@ -196,23 +146,14 @@
             <input class="input" type="date" name="start_date" required />
           </label>
 
-          <label class="field" id="endDateWrap" style="display:none;">
-            <span>終了日</span>
-            <input class="input" type="date" name="end_date" />
-          </label>
-
-          <label class="field">
-            <span>集計ソース</span>
-            <select class="input" name="source_mode">
-              <option value="internal">内部入力（ライブ入力）</option>
-              <option value="external">外部集計（CSV貼り付け）</option>
-            </select>
-          </label>
-
-          <div class="field">
-            <span>&nbsp;</span>
-            <button class="btn primary" type="submit">作成</button>
+          <div class="ruleHead">
+            <div class="card-title">返礼ルール</div>
+            <button id="addRuleRowBtn" type="button" class="btn ghost">＋行を追加</button>
           </div>
+
+          <div id="rulesBox" class="rulesBox"></div>
+
+          <button class="btn primary" type="submit">企画を作成</button>
         </form>
       </section>
     </section>
@@ -223,31 +164,40 @@
     <section class="pagehead">
       <div>
         <div class="row gap">
-          <a class="btn ghost" href="#campaigns">← 企画一覧</a>
+          <a class="btn ghost" href="#tasks">← タスク管理へ</a>
+          <a class="btn ghost" href="#campaigns">企画作成へ</a>
           <div class="pill" id="campaignStatusPill">—</div>
         </div>
         <div class="h1" id="campaignTitle"></div>
         <div class="muted" id="campaignMeta"></div>
       </div>
+
       <button id="deleteCampaignBtn" class="btn danger" type="button">企画削除</button>
     </section>
 
     <section class="grid2 top">
       <section class="card">
         <div class="card-head">
-          <div class="card-title">リーダーボード</div>
-          <div class="muted">入力すると即反映</div>
+          <div class="card-title">リスナー集計</div>
+          <div class="muted">合計pt → 返礼品（自動判定）</div>
         </div>
+
         <table class="table">
-          <thead><tr><th>名前</th><th class="right">合計pt</th></tr></thead>
+          <thead>
+            <tr>
+              <th>名前</th>
+              <th class="right">合計pt</th>
+              <th>返礼品</th>
+            </tr>
+          </thead>
           <tbody id="leaderboardBody"></tbody>
         </table>
       </section>
 
-      <section class="card" id="liveCard">
+      <section class="card">
         <div class="card-head">
           <div class="card-title">ライブ入力（内部入力）</div>
-          <div class="muted">加算ボタン + Undo で誤入力を潰す</div>
+          <div class="muted">加算・Undo・訂正</div>
         </div>
 
         <div class="stack">
@@ -276,27 +226,34 @@
           <div id="liveMsg" class="muted"></div>
         </div>
       </section>
-
-      <section class="card hidden" id="externalCard">
-        <div class="card-head">
-          <div class="card-title">外部集計（CSV貼り付け）</div>
-          <div class="muted">形式：name,total_points（ヘッダー不要）</div>
-        </div>
-        <textarea id="csvText" class="textarea" rows="10" placeholder="例：
-Alice,1200
-Bob,3000"></textarea>
-        <div class="row gap">
-          <button id="importCsvBtn" class="btn primary" type="button">取り込み/更新</button>
-          <button id="clearExternalBtn" class="btn ghost" type="button">外部集計クリア</button>
-        </div>
-      </section>
     </section>
 
     <section class="card">
       <div class="card-head">
         <div class="card-title">タスク</div>
-        <div class="muted">ここが漏れ防止の本体</div>
+        <div class="muted">検索：リスナー / 日付</div>
       </div>
+
+      <div class="grid3">
+        <label class="field">
+          <span>リスナー検索</span>
+          <input id="taskSearchListener" class="input" placeholder="例：Alice" />
+        </label>
+        <label class="field">
+          <span>日付 From</span>
+          <input id="taskSearchFrom" class="input" type="date" />
+        </label>
+        <label class="field">
+          <span>日付 To</span>
+          <input id="taskSearchTo" class="input" type="date" />
+        </label>
+        <div class="field">
+          <span>&nbsp;</span>
+          <button id="clearTaskSearch" class="btn ghost" type="button">検索クリア</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
 
       <form id="createTaskForm" class="grid3">
         <label class="field">
@@ -323,7 +280,9 @@ Bob,3000"></textarea>
         </div>
       </form>
 
-      <div id="kanban" class="kanban"></div>
+      <div class="divider"></div>
+
+      <div id="taskList" class="taskList"></div>
     </section>
   </main>
 
