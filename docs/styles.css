@@ -1,5 +1,166 @@
-body { font-family: system-ui; margin: 16px; }
-.hidden { display:none; }
-.card { border:1px solid #ccc; border-radius:8px; padding:12px; margin-bottom:12px; }
-button { margin:4px; }
-.muted { color:#666; font-size:12px; }
+:root{
+  --bg:#0b0f17;
+  --panel:#111827;
+  --panel2:#0f172a;
+  --text:#e5e7eb;
+  --muted:#9ca3af;
+  --line:#243244;
+  --primary:#3b82f6;
+  --danger:#ef4444;
+  --soft:#1f2937;
+  --shadow: 0 10px 30px rgba(0,0,0,.25);
+  --radius:14px;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family: system-ui,-apple-system,"Segoe UI",sans-serif;
+  background: radial-gradient(1200px 700px at 10% 0%, #111f3d 0%, var(--bg) 55%);
+  color: var(--text);
+}
+
+.wrap{max-width:1100px; margin:0 auto; padding:16px}
+.stack{display:grid; gap:14px}
+.hidden{display:none !important}
+.row{display:flex; align-items:center}
+.space-between{justify-content:space-between}
+.gap-sm{gap:10px}
+.top{align-items:start}
+
+.topbar{
+  position:sticky; top:0; z-index:10;
+  background: rgba(11,15,23,.75);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(36,50,68,.6);
+}
+
+.brand{font-weight:800; letter-spacing:.2px; font-size:18px}
+.muted{color:var(--muted); font-size:12px}
+
+.card{
+  background: linear-gradient(180deg, rgba(17,24,39,.92), rgba(15,23,42,.92));
+  border:1px solid rgba(36,50,68,.8);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.h2{font-size:18px; margin:0}
+.h3{font-size:15px; margin:0 0 10px}
+
+.input, .textarea, select{
+  width:100%;
+  background: rgba(17,24,39,.6);
+  color: var(--text);
+  border:1px solid rgba(36,50,68,.9);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+}
+.input:focus, .textarea:focus, select:focus{
+  border-color: rgba(59,130,246,.9);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.18);
+}
+
+.field{display:grid; gap:6px; font-size:13px}
+.grid2{display:grid; grid-template-columns: 1fr 1fr; gap:12px}
+@media (max-width: 900px){
+  .grid2{grid-template-columns:1fr}
+}
+
+.btn{
+  border:1px solid rgba(36,50,68,.9);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(31,41,55,.8);
+  color: var(--text);
+  cursor:pointer;
+  user-select:none;
+}
+.btn:hover{filter:brightness(1.05)}
+.btn.primary{
+  background: linear-gradient(180deg, rgba(59,130,246,.95), rgba(37,99,235,.9));
+  border-color: rgba(59,130,246,.75);
+}
+.btn.secondary{background: rgba(31,41,55,.55)}
+.btn.danger{
+  background: rgba(239,68,68,.12);
+  border-color: rgba(239,68,68,.55);
+  color: #fecaca;
+}
+
+.filebtn{display:inline-flex; align-items:center; gap:8px}
+
+.list{display:grid; gap:10px; margin-top:10px}
+.item{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px;
+  border-radius: 14px;
+  border:1px solid rgba(36,50,68,.8);
+  background: rgba(17,24,39,.45);
+}
+.item .title{font-weight:700}
+.badge{
+  font-size:12px;
+  color: var(--muted);
+  border:1px solid rgba(36,50,68,.8);
+  background: rgba(31,41,55,.55);
+  padding:2px 8px;
+  border-radius:999px;
+}
+.statusIcon{font-size:18px}
+
+.table{width:100%; border-collapse:collapse; margin-top:10px}
+.table th, .table td{
+  padding:10px 8px;
+  border-bottom:1px solid rgba(36,50,68,.55);
+}
+.table th{color: var(--muted); font-weight:600; font-size:12px}
+.right{text-align:right}
+
+.wrapBtns{flex-wrap:wrap; gap:10px}
+
+.kanban{
+  display:grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap:10px;
+  margin-top:12px;
+}
+@media (max-width: 900px){
+  .kanban{grid-template-columns:1fr}
+}
+.col{
+  border:1px solid rgba(36,50,68,.75);
+  background: rgba(17,24,39,.35);
+  border-radius: 14px;
+  padding:10px;
+  min-height: 160px;
+}
+.colHead{
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:10px;
+}
+.task{
+  border:1px solid rgba(36,50,68,.75);
+  background: rgba(15,23,42,.65);
+  border-radius: 14px;
+  padding:10px;
+  margin-bottom:10px;
+}
+.taskTitle{font-weight:700}
+.taskSub{color:var(--muted); font-size:12px; margin-top:4px}
+.taskBtns{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+
+.toast{
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  background: rgba(17,24,39,.95);
+  border:1px solid rgba(36,50,68,.85);
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  max-width: 360px;
+}
